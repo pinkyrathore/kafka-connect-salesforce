@@ -16,8 +16,9 @@
 package com.github.jcustenborder.kafka.connect.salesforce;
 
 
-import io.confluent.kafka.connect.utils.config.MarkdownFormatter;
 import org.junit.jupiter.api.Test;
+
+import com.github.jcustenborder.kafka.connect.utils.config.MarkdownFormatter;
 
 public class SalesforceSourceConfigTest {
 

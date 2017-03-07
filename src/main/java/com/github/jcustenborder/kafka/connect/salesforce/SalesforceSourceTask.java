@@ -207,7 +207,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
         log.debug("message={}", jsonMessage);
       }
       JsonNode jsonNode = objectMapper.readTree(jsonMessage);
-      SourceRecord record = SObjectHelper.convert(jsonNode, this.config.salesForcePushTopicName(), this.config.kafkaTopic(), keySchema, valueSchema);
+      SourceRecord record = SObjectHelper.convert(this.config, jsonNode, keySchema, valueSchema);
       this.messageQueue.add(record);
     } catch (Exception ex) {
       if (log.isErrorEnabled()) {

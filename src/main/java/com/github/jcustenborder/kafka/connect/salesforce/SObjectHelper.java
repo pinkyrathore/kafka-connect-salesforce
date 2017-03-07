@@ -15,12 +15,11 @@
  */
 package com.github.jcustenborder.kafka.connect.salesforce;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.google.api.client.util.Preconditions;
-import com.google.common.collect.ImmutableMap;
-import com.github.jcustenborder.kafka.connect.salesforce.rest.model.SObjectDescriptor;
-import io.confluent.kafka.connect.utils.data.Parser;
-import io.confluent.kafka.connect.utils.data.type.DateTypeParser;
+import java.text.SimpleDateFormat;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TimeZone;
+
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Field;
@@ -32,15 +31,23 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.text.SimpleDateFormat;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TimeZone;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.TextNode;
+import com.github.jcustenborder.kafka.connect.salesforce.rest.model.SObjectDescriptor;
+import com.github.jcustenborder.kafka.connect.utils.data.Parser;
+import com.github.jcustenborder.kafka.connect.utils.data.type.DateTypeParser;
+import com.google.api.client.util.Preconditions;
+import com.google.common.collect.ImmutableMap;
 
 class SObjectHelper {
   static final Parser PARSER;
   static final Map<String, ?> SOURCE_PARTITIONS = new HashMap<>();
   private static final Logger log = LoggerFactory.getLogger(SObjectHelper.class);
+  private static final String TOPIC_NAME_SPLIT_REGEX = "(?=[^\\}]*(?:\\{|$))";
+  private static final int ONE = 1;
+  private static final String ESCAPE_CHAR = "\\";
+  private static final String DOT = ".";
+  private static final String HYPHEN = "-";
 
   static {
     Parser p = new Parser();
@@ -169,19 +176,83 @@ class SObjectHelper {
     }
   }
 
-  public static SourceRecord convert(JsonNode jsonNode, String pushTopicName, String topic, Schema keySchema, Schema valueSchema) {
+  public static SourceRecord convert(SalesforceSourceConfig config, JsonNode jsonNode, Schema keySchema, Schema valueSchema) {
+    String topic = config.kafkaTopic();
     Preconditions.checkNotNull(jsonNode);
     Preconditions.checkState(jsonNode.isObject());
     JsonNode dataNode = jsonNode.get("data");
     JsonNode eventNode = dataNode.get("event");
     JsonNode sobjectNode = dataNode.get("sobject");
     long replayId = eventNode.get("replayId").asLong();
+    topic = parseTopicName(topic, config.topicNameDelimiter(), dataNode);
     Struct keyStruct = new Struct(keySchema);
     Struct valueStruct = new Struct(valueSchema);
     convertStruct(sobjectNode, keySchema, keyStruct);
     convertStruct(sobjectNode, valueSchema, valueStruct);
-    Map<String, Long> sourceOffset = ImmutableMap.of(pushTopicName, replayId);
+    Map<String, Long> sourceOffset = ImmutableMap.of(config.salesForcePushTopicName(), replayId);
     return new SourceRecord(SOURCE_PARTITIONS, sourceOffset, topic, keySchema, keyStruct, valueSchema, valueStruct);
   }
 
+  private static String parseTopicName(String topic, String delimiter, JsonNode dataNode) {
+    /*
+     * Valid delimiters are : 
+     * DOT (,)
+     * UNDERSCORE (_)
+     * HYPHEN (-)
+     * */
+    String splitDelimiter = delimiter;
+    if (DOT.equals(delimiter) || HYPHEN.equals(delimiter)) {
+      splitDelimiter = ESCAPE_CHAR + delimiter; // \\. or \\-
+    }
+
+    /*
+     * Example 1 - 
+     * kafka topic name : test.product.{event.type}
+     * Delimiter : . (DOT)
+     * Output of split :  [test, product, {event.type}]
+     * 
+     * Example 2 -
+     * kafka topic name : test-product-{event.type}
+     * Delimiter : - (HYPHEN)
+     * Output of split :  [test, product, {event.type}]
+     * 
+     */
+    String[] kafkaTopicSplit = topic.split(splitDelimiter + TOPIC_NAME_SPLIT_REGEX);
+    StringBuilder kafkaTopicNameBuilder = new StringBuilder();
+    int idx = 0;
+    for (String token : kafkaTopicSplit) {
+      if (token.startsWith("{") && token.endsWith("}")) {
+        replaceText(dataNode, kafkaTopicNameBuilder, token);  // e.g. token = {event.type}
+      } else {
+        kafkaTopicNameBuilder.append(token);
+      }
+      if (idx < kafkaTopicSplit.length - ONE) {
+        kafkaTopicNameBuilder.append(delimiter);    // join literals by the same delimiter
+      }
+      idx++;
+    }
+    return kafkaTopicNameBuilder.toString();
+  }
+
+  private static void replaceText(JsonNode dataNode, StringBuilder kafkaTopicNameBuilder, String token) {
+    String path = token.substring(ONE, token.length() - ONE); // path = event.type
+    JsonNode value = readValue(dataNode, path);
+    if (value instanceof TextNode) {
+      kafkaTopicNameBuilder.append(value.asText());
+    } else {
+      kafkaTopicNameBuilder.append(token);
+    }
+  }
+
+  private static JsonNode readValue(JsonNode source, String path) {
+    JsonNode value = null;
+    String[] tokens = path.split(ESCAPE_CHAR +  DOT); // path = [event, type]
+    JsonNode current = source;
+    for (int idx = 0; idx < tokens.length; idx++) {
+      String key = tokens[idx];
+      value = current.get(key);
+      current = value;
+    }
+    return value;
+  }
 }

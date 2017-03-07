@@ -15,13 +15,14 @@
  */
 package com.github.jcustenborder.kafka.connect.salesforce;
 
-import io.confluent.kafka.connect.utils.config.ValidPattern;
+import java.util.Map;
+
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigDef.Type;
 
-import java.util.Map;
+import com.github.jcustenborder.kafka.connect.utils.config.ValidPattern;
 
 
 public class SalesforceSourceConfig extends AbstractConfig {
@@ -45,6 +46,7 @@ public class SalesforceSourceConfig extends AbstractConfig {
   public static final String KAFKA_TOPIC_CONF = "kafka.topic";
 
   public static final String CONNECTION_TIMEOUT_CONF = "connection.timeout";
+  public static final String TOPIC_NAME_DELIMITER = "topic.name.delimiter";
 
   static final String VERSION_DOC = "The version of the salesforce API to use.";
   static final String USERNAME_DOC = "Salesforce username to connect with.";
@@ -64,7 +66,8 @@ public class SalesforceSourceConfig extends AbstractConfig {
   static final String SALESFORCE_PUSH_TOPIC_NOTIFY_UNDELETE_DOC = "Flag to determine if the PushTopic should respond to undeletes.";
   static final String SALESFORCE_OBJECT_DOC = "The Salesforce object to create a topic for.";
   static final String KAFKA_TOPIC_DOC = "The Kafka topic to write the SalesForce data to.";
-
+  static final String TOPIC_NAME_DELIMITER_DOC = "The kafka topic delimiter. Default is . (DOT). Required when using string pattern replacement to read parameters from received data object and replace in kafka topic name.";
+  
   public SalesforceSourceConfig(ConfigDef config, Map<String, ?> parsedConfig) {
     super(config, parsedConfig);
   }
@@ -91,7 +94,8 @@ public class SalesforceSourceConfig extends AbstractConfig {
         .define(SALESFORCE_PUSH_TOPIC_NOTIFY_CREATE_CONF, Type.BOOLEAN, true, Importance.LOW, SALESFORCE_PUSH_TOPIC_NOTIFY_CREATE_DOC)
         .define(SALESFORCE_PUSH_TOPIC_NOTIFY_UPDATE_CONF, Type.BOOLEAN, true, Importance.LOW, SALESFORCE_PUSH_TOPIC_NOTIFY_UPDATE_DOC)
         .define(SALESFORCE_PUSH_TOPIC_NOTIFY_DELETE_CONF, Type.BOOLEAN, true, Importance.LOW, SALESFORCE_PUSH_TOPIC_NOTIFY_DELETE_DOC)
-        .define(SALESFORCE_PUSH_TOPIC_NOTIFY_UNDELETE_CONF, Type.BOOLEAN, true, Importance.LOW, SALESFORCE_PUSH_TOPIC_NOTIFY_UNDELETE_DOC);
+        .define(SALESFORCE_PUSH_TOPIC_NOTIFY_UNDELETE_CONF, Type.BOOLEAN, true, Importance.LOW, SALESFORCE_PUSH_TOPIC_NOTIFY_UNDELETE_DOC)
+        .define(TOPIC_NAME_DELIMITER, Type.STRING, ".", Importance.LOW, TOPIC_NAME_DELIMITER_DOC);
   }
 
   public String username() {
@@ -161,5 +165,9 @@ public class SalesforceSourceConfig extends AbstractConfig {
 
   public String version() {
     return this.getString(VERSION_CONF);
+  }
+
+  public String topicNameDelimiter() {
+    return this.getString(TOPIC_NAME_DELIMITER);
   }
 }
