@@ -45,9 +45,11 @@ class SObjectHelper {
   private static final Logger log = LoggerFactory.getLogger(SObjectHelper.class);
   private static final String TOPIC_NAME_SPLIT_REGEX = "(?=[^\\}]*(?:\\{|$))";
   private static final int ONE = 1;
+  private static final int TWO = 2;
   private static final String ESCAPE_CHAR = "\\";
   private static final String DOT = ".";
   private static final String HYPHEN = "-";
+  private static final String DOLLAR = "$";
 
   static {
     Parser p = new Parser();
@@ -221,8 +223,8 @@ class SObjectHelper {
     StringBuilder kafkaTopicNameBuilder = new StringBuilder();
     int idx = 0;
     for (String token : kafkaTopicSplit) {
-      if (token.startsWith("{") && token.endsWith("}")) {
-        replaceText(dataNode, kafkaTopicNameBuilder, token);  // e.g. token = {event.type}
+      if (token.startsWith(DOLLAR)) {
+        replaceText(dataNode, kafkaTopicNameBuilder, token);  // e.g. token = ${event.type}
       } else {
         kafkaTopicNameBuilder.append(token);
       }
@@ -235,7 +237,7 @@ class SObjectHelper {
   }
 
   private static void replaceText(JsonNode dataNode, StringBuilder kafkaTopicNameBuilder, String token) {
-    String path = token.substring(ONE, token.length() - ONE); // path = event.type
+    String path = token.substring(TWO, token.length() - ONE); // path = event.type
     JsonNode value = readValue(dataNode, path);
     if (value instanceof TextNode) {
       kafkaTopicNameBuilder.append(value.asText());
