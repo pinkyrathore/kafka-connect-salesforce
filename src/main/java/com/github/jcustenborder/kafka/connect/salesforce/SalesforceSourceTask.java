@@ -62,7 +62,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
   Schema keySchema;
   Schema valueSchema;
   ObjectMapper objectMapper = new ObjectMapper();
-  boolean connected = true;
+  boolean isSubscribed = true;
 
   @Override
   public String version() {
@@ -95,7 +95,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
       @Override
       public void onFailure(Throwable failure, List<? extends Message> messages) {
         log.debug("Connection failure");
-        connected = false;
+        isSubscribed = false;
       }
     };
   }
@@ -157,9 +157,9 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
           if (log.isErrorEnabled()) {
             log.error("Error during handshake: {} {}", message.get("error"), message.get("exception"));
           }
-        } else if (!connected) {
+        } else if (!isSubscribed) {
           subscribe();
-          connected = true;
+          isSubscribed = true;
         }
       }
     });
