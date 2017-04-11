@@ -160,6 +160,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
           }
         } else if (!connected.get()) {
           subscribe();
+          connected.set(true);
         }
       }
     });
