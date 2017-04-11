@@ -46,7 +46,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 
 public class SalesforceSourceTask extends SourceTask implements ClientSessionChannel.MessageListener {
@@ -63,7 +62,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
   Schema keySchema;
   Schema valueSchema;
   ObjectMapper objectMapper = new ObjectMapper();
-  AtomicBoolean connected = new AtomicBoolean(true);
+  boolean connected = true;
 
   @Override
   public String version() {
@@ -95,8 +94,8 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
     return new BayeuxClient(this.streamingUrl.toString(), transport) {
       @Override
       public void onFailure(Throwable failure, List<? extends Message> messages) {
-        log.error("Connection failure");
-        connected.set(false);
+        log.debug("Connection failure");
+        connected = false;
       }
     };
   }
@@ -158,9 +157,9 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
           if (log.isErrorEnabled()) {
             log.error("Error during handshake: {} {}", message.get("error"), message.get("exception"));
           }
-        } else if (!connected.get()) {
+        } else if (!connected) {
           subscribe();
-          connected.set(true);
+          connected = true;
         }
       }
     });
