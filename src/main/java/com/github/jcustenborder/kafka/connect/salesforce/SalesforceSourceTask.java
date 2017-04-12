@@ -62,7 +62,6 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
   Schema keySchema;
   Schema valueSchema;
   ObjectMapper objectMapper = new ObjectMapper();
-  boolean isSubscribed = true;
 
   @Override
   public String version() {
@@ -91,13 +90,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
       }
     };
 
-    return new BayeuxClient(this.streamingUrl.toString(), transport) {
-      @Override
-      public void onFailure(Throwable failure, List<? extends Message> messages) {
-        log.debug("Connection failure");
-        isSubscribed = false;
-      }
-    };
+    return new BayeuxClient(this.streamingUrl.toString(), transport);
   }
 
   @Override
@@ -157,9 +150,8 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
           if (log.isErrorEnabled()) {
             log.error("Error during handshake: {} {}", message.get("error"), message.get("exception"));
           }
-        } else if (!isSubscribed) {
+        } else {
           subscribe();
-          isSubscribed = true;
         }
       }
     });
@@ -168,10 +160,6 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
       log.info("Starting handshake");
     }
     this.streamingClient.handshake();
-    if (!this.streamingClient.waitFor(30000, BayeuxClient.State.CONNECTED)) {
-      throw new ConnectException("Not connected after 30,000 ms.");
-    }
-    subscribe();
   }
 
   public void subscribe() {
