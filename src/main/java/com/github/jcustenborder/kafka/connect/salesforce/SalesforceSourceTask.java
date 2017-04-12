@@ -162,7 +162,7 @@ public class SalesforceSourceTask extends SourceTask implements ClientSessionCha
     this.streamingClient.handshake();
   }
 
-  public void subscribe() {
+  private void subscribe() {
     String channel = String.format("/topic/%s", this.config.salesForcePushTopicName());
     if (log.isInfoEnabled()) {
       log.info("Subscribing to {}", channel);
