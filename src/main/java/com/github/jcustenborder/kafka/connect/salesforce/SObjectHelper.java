@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,11 +15,14 @@
  */
 package com.github.jcustenborder.kafka.connect.salesforce;
 
-import java.text.SimpleDateFormat;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TimeZone;
-
+import com.fasterxml.jackson.databind.JsonNode;
+import com.github.jcustenborder.kafka.connect.salesforce.rest.model.SObjectDescriptor;
+import com.github.jcustenborder.kafka.connect.utils.data.Parser;
+import com.github.jcustenborder.kafka.connect.utils.data.type.DateTypeParser;
+import com.google.api.client.util.Preconditions;
+import com.google.common.collect.ImmutableMap;
+import org.apache.kafka.common.utils.SystemTime;
+import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Field;
@@ -31,31 +34,36 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.TextNode;
-import com.github.jcustenborder.kafka.connect.salesforce.rest.model.SObjectDescriptor;
-import com.github.jcustenborder.kafka.connect.utils.data.Parser;
-import com.github.jcustenborder.kafka.connect.utils.data.type.DateTypeParser;
-import com.google.api.client.util.Preconditions;
-import com.google.common.collect.ImmutableMap;
+import java.text.SimpleDateFormat;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TimeZone;
 
 class SObjectHelper {
   static final Parser PARSER;
   static final Map<String, ?> SOURCE_PARTITIONS = new HashMap<>();
   private static final Logger log = LoggerFactory.getLogger(SObjectHelper.class);
-  private static final String TOPIC_NAME_SPLIT_REGEX = "(?=[^\\}]*(?:\\{|$))";
-  private static final int ONE = 1;
-  private static final int TWO = 2;
-  private static final String ESCAPE_CHAR = "\\";
-  private static final String DOT = ".";
-  private static final String HYPHEN = "-";
-  private static final String DOLLAR = "$";
+
+  final SalesforceSourceConnectorConfig config;
+  final Schema keySchema;
+  final Schema valueSchema;
+  final Map<String, Object> sourcePartition;
+  Time time = new SystemTime();
 
   static {
     Parser p = new Parser();
-//    "2016-08-15T22:07:59.000Z"
     p.registerTypeParser(Timestamp.SCHEMA, new DateTypeParser(TimeZone.getTimeZone("UTC"), new SimpleDateFormat("YYYY-MM-dd'T'HH:mm:ss.SSS'Z'")));
     PARSER = p;
+  }
+
+  public SObjectHelper(SalesforceSourceConnectorConfig config, Schema keySchema, Schema valueSchema) {
+    this.config = config;
+    this.keySchema = keySchema;
+    this.valueSchema = valueSchema;
+    this.sourcePartition = ImmutableMap.of(
+        "pushTopic",
+        this.config.salesForcePushTopicName
+    );
   }
 
   public static boolean isTextArea(SObjectDescriptor.Field field) {
@@ -143,8 +151,15 @@ class SObjectHelper {
       builder.field(field.name(), schema);
     }
 
+    builder.field(FIELD_OBJECT_TYPE, Schema.OPTIONAL_STRING_SCHEMA);
+    builder.field(FIELD_EVENT_TYPE, Schema.OPTIONAL_STRING_SCHEMA);
+
     return builder.build();
   }
+
+  public static final String FIELD_OBJECT_TYPE = "_ObjectType";
+  public static final String FIELD_EVENT_TYPE = "_EventType";
+
 
   public static Schema keySchema(SObjectDescriptor descriptor) {
     String name = String.format("%s.%sKey", SObjectHelper.class.getPackage().getName(), descriptor.name());
@@ -169,92 +184,45 @@ class SObjectHelper {
     return builder.build();
   }
 
-  public static void convertStruct(JsonNode data, Schema schema, Struct struct) {
+  public void convertStruct(JsonNode sObjectNode, Schema schema, Struct struct) {
     for (Field field : schema.fields()) {
       String fieldName = field.name();
-      JsonNode valueNode = data.findValue(fieldName);
+      JsonNode valueNode = sObjectNode.findValue(fieldName);
       Object value = PARSER.parseJsonNode(field.schema(), valueNode);
       struct.put(field, value);
     }
   }
 
-  public static SourceRecord convert(SalesforceSourceConfig config, JsonNode jsonNode, Schema keySchema, Schema valueSchema) {
-    String topic = config.kafkaTopic();
+  public SourceRecord convert(JsonNode jsonNode) {
     Preconditions.checkNotNull(jsonNode);
     Preconditions.checkState(jsonNode.isObject());
     JsonNode dataNode = jsonNode.get("data");
     JsonNode eventNode = dataNode.get("event");
     JsonNode sobjectNode = dataNode.get("sobject");
-    long replayId = eventNode.get("replayId").asLong();
-    topic = parseTopicName(topic, config.topicNameDelimiter(), dataNode);
+    final long replayId = eventNode.get("replayId").asLong();
+    final String eventType = eventNode.get("type").asText();
     Struct keyStruct = new Struct(keySchema);
     Struct valueStruct = new Struct(valueSchema);
     convertStruct(sobjectNode, keySchema, keyStruct);
     convertStruct(sobjectNode, valueSchema, valueStruct);
-    Map<String, Long> sourceOffset = ImmutableMap.of(config.salesForcePushTopicName(), replayId);
-    return new SourceRecord(SOURCE_PARTITIONS, sourceOffset, topic, keySchema, keyStruct, valueSchema, valueStruct);
-  }
+    valueStruct.put(FIELD_OBJECT_TYPE, this.config.salesForceObject);
+    valueStruct.put(FIELD_EVENT_TYPE, eventType);
 
-  private static String parseTopicName(String topic, String delimiter, JsonNode dataNode) {
-    /*
-     * Valid delimiters are : 
-     * DOT (,)
-     * UNDERSCORE (_)
-     * HYPHEN (-)
-     * */
-    String splitDelimiter = delimiter;
-    if (DOT.equals(delimiter) || HYPHEN.equals(delimiter)) {
-      splitDelimiter = ESCAPE_CHAR + delimiter; // \\. or \\-
-    }
 
-    /*
-     * Example 1 - 
-     * kafka topic name : test.product.{event.type}
-     * Delimiter : . (DOT)
-     * Output of split :  [test, product, {event.type}]
-     * 
-     * Example 2 -
-     * kafka topic name : test-product-{event.type}
-     * Delimiter : - (HYPHEN)
-     * Output of split :  [test, product, {event.type}]
-     * 
-     */
-    String[] kafkaTopicSplit = topic.split(splitDelimiter + TOPIC_NAME_SPLIT_REGEX);
-    StringBuilder kafkaTopicNameBuilder = new StringBuilder();
-    int idx = 0;
-    for (String token : kafkaTopicSplit) {
-      if (token.startsWith(DOLLAR)) {
-        replaceText(dataNode, kafkaTopicNameBuilder, token);  // e.g. token = ${event.type}
-      } else {
-        kafkaTopicNameBuilder.append(token);
-      }
-      if (idx < kafkaTopicSplit.length - ONE) {
-        kafkaTopicNameBuilder.append(delimiter);    // join literals by the same delimiter
-      }
-      idx++;
-    }
-    return kafkaTopicNameBuilder.toString();
-  }
-
-  private static void replaceText(JsonNode dataNode, StringBuilder kafkaTopicNameBuilder, String token) {
-    String path = token.substring(TWO, token.length() - ONE); // path = event.type
-    JsonNode value = readValue(dataNode, path);
-    if (value instanceof TextNode) {
-      kafkaTopicNameBuilder.append(value.asText());
+    final long timestamp;
+    java.util.Date date = (java.util.Date) valueStruct.get("SystemModstamp");
+    if (null != date) {
+      timestamp = date.getTime();
     } else {
-      kafkaTopicNameBuilder.append(token);
+      timestamp = this.time.milliseconds();
     }
+
+    String topic = this.config.kafkaTopicTemplate.execute(SalesforceSourceConnectorConfig.TEMPLATE_NAME, valueStruct);
+    if (this.config.kafkaTopicLowerCase) {
+      topic = topic.toLowerCase();
+    }
+    Map<String, Long> sourceOffset = ImmutableMap.of("replayId", replayId);
+    return new SourceRecord(SOURCE_PARTITIONS, sourceOffset, topic, null, this.keySchema, keyStruct, this.valueSchema, valueStruct, timestamp);
   }
 
-  private static JsonNode readValue(JsonNode source, String path) {
-    JsonNode value = null;
-    String[] tokens = path.split(ESCAPE_CHAR +  DOT); // path = [event, type]
-    JsonNode current = source;
-    for (int idx = 0; idx < tokens.length; idx++) {
-      String key = tokens[idx];
-      value = current.get(key);
-      current = value;
-    }
-    return value;
-  }
 }
